@@ -1,0 +1,50 @@
+watkins:
+  type: article
+  title: Q-learning
+  author: ["Watkins, Christopher J. C. H.", "Dayan, Peter"]
+  date: 1992
+  parent:
+    type: periodical
+    title: Machine Learning
+    volume: 8
+    issue: 3
+  page-range: 279-292
+
+pardo:
+  type: article
+  title: Time Limits in Reinforcement Learning
+  author: ["Pardo, Fabio", "Tavakoli, Arash", "Levdik, Vitaly", "Kormushev, Petar"]
+  date: 2018
+  parent:
+    type: proceedings
+    title: Proceedings of the 35th International Conference on Machine Learning (ICML)
+
+auer:
+  type: article
+  title: Finite-time Analysis of the Multiarmed Bandit Problem
+  author: ["Auer, Peter", "Cesa-Bianchi, Nicolò", "Fischer, Paul"]
+  date: 2002
+  parent:
+    type: periodical
+    title: Machine Learning
+    volume: 47
+  page-range: 235-256
+
+rmax:
+  type: article
+  title: "R-max: A General Polynomial Time Algorithm for Near-Optimal Reinforcement Learning"
+  author: ["Brafman, Ronen I.", "Tennenholtz, Moshe"]
+  date: 2002
+  parent:
+    type: periodical
+    title: Journal of Machine Learning Research
+    volume: 3
+  page-range: 213-231
+
+sutton:
+  type: book
+  title: "Reinforcement Learning: An Introduction"
+  author: ["Sutton, Richard S.", "Barto, Andrew G."]
+  edition: 2
+  date: 2018
+  publisher: MIT Press
