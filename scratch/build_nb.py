@@ -67,7 +67,7 @@ os.makedirs(FIG_DIR, exist_ok=True)
 MAIN_EPISODES = 15_000          # main agent (same budget as the template)
 NOISE_SHORT_EPISODES = 15_000   # robustness study, template budget
 NOISE_LONG_EPISODES = 300_000   # robustness study, long budget (action noise slows learning a lot)
-NOISE_SEEDS = [0, 1, 2]         # independent training runs per p_train
+NOISE_SEEDS = [0, 1, 2, 3, 4]   # independent training runs per p_train
 EVAL_EPISODES = 1_000           # evaluation episodes per (agent, p_test)
 BONUS_EPISODES = 15_000
 BONUS_SEEDS = [0, 1, 2]
@@ -94,15 +94,24 @@ def save(fig, name):
 
 
 def moving_average(x, window):
-    # Trailing moving average; the first window-1 points are NaN.
+    # Trailing moving average (expanding mean for the first window-1 points).
     x = np.asarray(x, dtype=float)
     if window <= 1:
         return x
     c = np.cumsum(np.insert(x, 0, 0.0))
-    return np.concatenate([np.full(window - 1, np.nan), (c[window:] - c[:-window]) / window])
+    head = c[1:window] / np.arange(1, window)  # expanding mean until a full window is available
+    return np.concatenate([head, (c[window:] - c[:-window]) / window])
 """)
 
 md(src(1))
+code(r"""
+# Compatibility: NumPy >= 2.5 removed the top-level alias np.chararray used by the renderer below.
+# The environment code itself is left unchanged.
+import warnings
+warnings.filterwarnings('ignore', message='The chararray class is deprecated')
+if not hasattr(np, 'chararray'):
+    np.chararray = np.char.chararray
+""")
 code(src(2))
 
 md(r"""
@@ -300,14 +309,14 @@ for v in rewards:
 
 # Plot the learning curve
 fig, ax = plt.subplots(figsize=(8, 3.6))
-ax.plot(rewards, color='#b7d3f6', linewidth=0.5, label='episode reward')
+ax.plot(rewards, color='#cde2fb', linewidth=0.3, label='episode reward (raw)')
 ax.plot(smoothed, color=SERIES[0], label='smoothed (EMA, weight 0.95)')
 ax.axhline(577, color=INK_2, linewidth=1)
 ax.text(len(rewards), 600, 'optimal return 577', ha='right', va='bottom', color=INK_2, fontsize=9)
 ax.set_xlabel('Episode'); ax.set_ylabel('Episode reward')
 ax.set_title('Q-learning: learning progress (ε decays 1.0 → 0.01 over the first 7,500 episodes)')
 ax.set_ylim(-2600, 900)
-ax.legend(loc='lower right')
+ax.legend(loc='upper left')
 save(fig, 'learning_curve.png')
 plt.show()
 """)
@@ -359,7 +368,7 @@ code(r"""
 H, W = CliffBoxGridWorld.world_height, CliffBoxGridWorld.world_width
 _probe = CliffBoxGridWorld()
 CLIFF_CELLS = {(r, c) for r in range(H) for c in range(W) if _probe._check_off_cliff((r, c))}
-GOAL = tuple(CliffBoxGridWorld.goal_pos.tolist())
+GOAL_CELL = tuple(CliffBoxGridWorld.goal_pos.tolist())
 ARROWS = {1: '↑', 2: '↓', 3: '←', 4: '→'}
 
 
@@ -379,8 +388,8 @@ def draw_world(ax, cell_fontsize=9):
     # Cliffs, goal, grid lines and axis ticks on a (row, col) grid.
     for (r, c) in CLIFF_CELLS:
         ax.add_patch(Rectangle((c - .5, r - .5), 1, 1, color=CLIFF_COLOR, zorder=2))
-    ax.add_patch(Rectangle((GOAL[1] - .5, GOAL[0] - .5), 1, 1, fill=False, edgecolor=GOAL_COLOR, linewidth=2.5, zorder=4))
-    ax.text(GOAL[1] + .32, GOAL[0] - .28, 'G', color=GOAL_COLOR, fontsize=cell_fontsize - 2, fontweight='bold', ha='center', va='center', zorder=5)
+    ax.add_patch(Rectangle((GOAL_CELL[1] - .5, GOAL_CELL[0] - .5), 1, 1, fill=False, edgecolor=GOAL_COLOR, linewidth=2.5, zorder=4))
+    ax.text(GOAL_CELL[1] + .32, GOAL_CELL[0] - .28, 'G', color=GOAL_COLOR, fontsize=cell_fontsize - 2, fontweight='bold', ha='center', va='center', zorder=5)
     ax.set_xlim(-.5, W - .5); ax.set_ylim(H - .5, -.5)
     ax.set_xticks(range(W)); ax.set_yticks(range(H))
     ax.set_xticks(np.arange(-.5, W), minor=True); ax.set_yticks(np.arange(-.5, H), minor=True)
@@ -471,7 +480,7 @@ code(r"""
 # Value of each box position, taking the best agent cell.
 V_box = np.full((H, W), np.nan)
 for (r, c) in [(r, c) for r in range(H) for c in range(W)]:
-    if (r, c) in CLIFF_CELLS or (r, c) == GOAL:
+    if (r, c) in CLIFF_CELLS or (r, c) == GOAL_CELL:
         continue
     V, _ = policy_grid(agent, (r, c))
     if not np.all(np.isnan(V)):
@@ -561,13 +570,13 @@ md(r"""
 ## 6. Action-noise robustness study
 
 **Protocol.** In the training/evaluation loop (not in `step()`), with probability $p$ the selected action is replaced by
-one of the other three actions uniformly at random. For each $p_{train} \in \{0, 0.1, 0.2\}$ we train **3 independent agents**
-(seeds 0, 1, 2) with exactly the same agent and hyper-parameters as the main agent, under two budgets:
+one of the other three actions uniformly at random. For each $p_{train} \in \{0, 0.1, 0.2\}$ we train **5 independent agents**
+(seeds 0–4) with exactly the same agent and hyper-parameters as the main agent, under two budgets:
 * **15,000 episodes**, the template's budget, and
 * **300,000 episodes**, because the short budget turns out to be far too small once noise is present.
 
 Every trained policy is then evaluated greedily (ε = 0, only the specified action noise) for 1,000 episodes under each
-$p_{test} \in \{0, 0.1, 0.2\}$. Tables report the mean over the 3 seeds (± std).
+$p_{test} \in \{0, 0.1, 0.2\}$. Tables report the mean over the 5 seeds (± std), and the per-seed results are printed as well.
 The training runs are independent, so they are executed in parallel worker processes.
 """)
 md(src(19))
@@ -610,8 +619,10 @@ for col, budget in enumerate([NOISE_SHORT_EPISODES, NOISE_LONG_EPISODES]):
     axes[1, col].set_xlabel('Episode')
 axes[0, 0].set_ylabel(f'Episode reward\n(moving average)')
 axes[1, 0].set_ylabel('Training success rate\n(moving average)')
-axes[0, 0].legend(loc='upper left')
-fig.suptitle('Training under action noise: mean over 3 seeds, band = min/max across seeds; '
+axes[1, 0].set_ylim(-0.02, 1.02)
+handles, labels = axes[0, 0].get_legend_handles_labels()
+fig.legend(handles, labels, loc='outside lower center', ncol=3)
+fig.suptitle(f'Training under action noise: mean over {len(NOISE_SEEDS)} seeds, band = min/max across seeds; '
              'moving-average window = 2% of the budget', fontsize=10)
 save(fig, 'noise_training_curves.png')
 plt.show()
@@ -665,8 +676,14 @@ for budget, (sr, ret) in results.items():
     print(ret.mean(0).round(1))
     print("Per-seed success rate at p_test = p_train:",
           {p: sr[:, i, i].round(2).tolist() for i, p in enumerate(noise_levels)})
-print("\nDP optimum (upper bound) for each p_test: success", [round(OPTIMAL[p][1], 3) for p in noise_levels],
-      " return", [round(OPTIMAL[p][0], 1) for p in noise_levels])
+print("\nDP optimum (upper bound) for p_test = 0 / 0.1 / 0.2: success",
+      ' / '.join(f'{OPTIMAL[p][1]:.3f}' for p in noise_levels), "; return", ' / '.join(f'{OPTIMAL[p][0]:.1f}' for p in noise_levels))
+
+print("\nPer-seed results, long budget (success rate at p_test = 0 / 0.1 / 0.2 | return at p_test = 0.1):")
+sr, ret = results[NOISE_LONG_EPISODES]
+for i, p in enumerate(noise_levels):
+    for k, s in enumerate(NOISE_SEEDS):
+        print(f"  p_train={p} seed={s}: SR " + ' / '.join(f'{v:.3f}' for v in sr[k, i]) + f" | R {ret[k, i, 1]:7.1f}")
 """)
 
 code(r"""
@@ -684,16 +701,17 @@ def heatmap(ax, mean, std, title, fmt, vmin, vmax):
     return im
 
 
-fig, axes = plt.subplots(2, 2, figsize=(10, 8.4), constrained_layout=True)
+fig, axes = plt.subplots(2, 2, figsize=(8.6, 8.4), constrained_layout=True)
 for row, budget in enumerate([NOISE_SHORT_EPISODES, NOISE_LONG_EPISODES]):
     sr, ret = results[budget]
     im0 = heatmap(axes[row, 0], sr.mean(0), sr.std(0), f'Success rate — {budget:,} episodes', '.2f', 0, 1)
     im1 = heatmap(axes[row, 1], ret.mean(0), ret.std(0), f'Average return — {budget:,} episodes', '.0f', -2000, 600)
 fig.colorbar(im0, ax=axes[:, 0], shrink=0.5, location='bottom', label='success rate')
 fig.colorbar(im1, ax=axes[:, 1], shrink=0.5, location='bottom', label='average episode return')
-fig.suptitle(f'Cross-noise evaluation (greedy policy, {EVAL_EPISODES} episodes per cell, mean ± std over 3 seeds)\n'
-             f'DP optimum per p_test: success {[round(OPTIMAL[p][1], 2) for p in noise_levels]}, '
-             f'return {[round(OPTIMAL[p][0]) for p in noise_levels]}', fontsize=10)
+opt_sr = ', '.join(f'{OPTIMAL[p][1]:.2f}' for p in noise_levels)
+opt_ret = ', '.join(f'{OPTIMAL[p][0]:.0f}' for p in noise_levels)
+fig.suptitle(f'Cross-noise evaluation (greedy policy, {EVAL_EPISODES} episodes per cell, mean ± std over {len(NOISE_SEEDS)} seeds)\n'
+             f'DP optimum for p_test = 0 / 0.1 / 0.2: success {opt_sr}; return {opt_ret}', fontsize=10)
 save(fig, 'noise_heatmaps.png')
 plt.show()
 """)
@@ -821,19 +839,21 @@ plot_runs(exploration_runs, 'training_rewards', 'Episode reward (moving average,
 """)
 
 md(r"""
-**Analysis.**
-* **"No exploration" with $Q_0 = 0$ works, and is in fact the fastest here**, because it isn't really without exploration: every
-  real reward is negative, so 0 is an *optimistic* estimate. Each time a state-action is tried its value drops below the untried
-  ones, so the greedy agent systematically sweeps through the state space (optimism in the face of uncertainty).
-* With **pessimistic** $Q_0 = -3000$ the same greedy agent never finds the goal. Every tried action looks *better* than the untried
-  ones, so the agent keeps repeating what it already knows. This shows that the initial values are what drive exploration in the "greedy" case.
-* **UCB1** turns uncertainty into an explicit bonus. It finds the goal earlier than ε-greedy and has a much higher
-  reward during training, because its exploration is directed (rarely tried actions) rather than random (it doesn't keep walking
-  off cliffs at random). A large $c$ (we tried 100–500) over-explores relative to the reward scale.
-* **ε-greedy** explores by undirected dithering. Every random action next to a cliff can be fatal, which is why its
-  training reward is the lowest, and the constant ε = 0.1 version keeps paying that price until the end. Decaying ε fixes the
-  late-training cost, but the early high-ε phase contributes little except cliff deaths.
-* All strategies except the pessimistic one end with the optimal greedy return.
+**Analysis** (numbers from the table above; 3 seeds each).
+* **The two optimism-driven strategies are clearly best.** UCB1 and "no exploration" with $Q_0=0$ both find the goal after
+  ≈4.5k episodes and reach a 100% training success rate. They also have by far the highest mean training reward (≈ −300 vs. ≈ −1100 to −1200 for ε-greedy).
+* **"No exploration" with $Q_0 = 0$ is not actually exploration-free.** Every real reward is negative, so 0 is an *optimistic* estimate.
+  Each time a state-action is tried its value drops below the untried ones, so the greedy agent systematically sweeps through the
+  state space (optimism in the face of uncertainty).
+* With a **pessimistic** $Q_0 = -3000$, the same greedy agent never finds the goal (0/3). Every tried action looks *better* than the untried
+  ones, so the agent keeps repeating what it already knows. This shows that the initial values are what make the greedy agent explore.
+* **UCB1** turns uncertainty into an explicit bonus that shrinks with the visit count. Its exploration is *directed* (towards rarely tried actions) rather than
+  random. In preliminary runs a large $c$ (100–500, comparable to the reward scale) over-explored and converged later or not at all.
+* **ε-greedy explores by undirected dithering, which suits this task poorly.** A successful episode needs about 40 consecutive correct
+  actions next to cliffs, and a single random action can push the box over the edge. With decaying ε the goal is first reached only
+  after ε has fallen to its floor (≈10.9k episodes, against 7.5k for the decay), so the high-ε phase mostly produces cliff deaths. Constant ε = 0.1 finds the goal
+  earlier (≈7.9k) but keeps paying for its random actions: only 57% of its last 1,000 training episodes succeed (95% with decaying ε).
+* All strategies except the pessimistic one end with the optimal greedy policy (return 577).
 """)
 
 # ---------------------------------------------------------------- bonus B
@@ -890,12 +910,15 @@ plt.show()
 """)
 
 md(r"""
-**Analysis.** With the sparse reward, ε-greedy and greedy-with-$Q_0=0$ never see a single success in 15k episodes, so the
-Q-table stays all zeros. Optimistic initialisation with greedy action selection discovers the goal within a few thousand episodes
-and learns a policy that reaches the goal in the minimum number of steps (39), the same length as the dense-reward optimum.
-$Q_0 = 100$ is faster than $Q_0 = 1000$: with $\gamma = 0.99$ and $\alpha = 0.1$, a very large optimistic value takes longer to
-"wear off" in states that have already been explored, so the agent spends more episodes re-checking them before it commits to
-the frontier.
+**Analysis** (numbers from the table above; 3 seeds each).
+* ε-greedy and greedy-with-$Q_0=0$ never see a single success in 15k episodes, so their Q-tables stay at zero (0/3 seeds).
+* **Optimistic $Q_0 = 100$ with greedy action selection solves the sparse task for every seed.** The goal is first reached after ≈9.9k
+  episodes, the last 1,000 training episodes all succeed, and the greedy policy reaches the goal in 39 steps (the minimum, the same as the dense-reward
+  optimum), with a return of ≈572 under the original reward (optimum 577).
+* **Too much optimism prevents exploitation.** $Q_0 = 1000$ also finds the goal (≈9.9k episodes) but does not converge within 15k
+  episodes (greedy success 0/3). The discounted value of the real solution from the start is only about $1000\,\gamma^{38} \approx 680$, so every
+  untried state-action anywhere in the state space still looks better than the known route. The agent therefore keeps exploring until all of that
+  optimism has worn off. The optimistic value should be large enough to beat dead ends (worth 0) but below the value of a real solution.
 """)
 
 nb = nbformat.v4.new_notebook()
