@@ -1,0 +1,48 @@
+p_train=0.1 seed=1: training success over last 10k episodes = 0.470
+  after 200,000 ep: noiseless greedy success 0 (return  -1750) | p_test=0.1: SR 0.458, return  -842.0
+  after 210,000 ep: noiseless greedy success 0 (return  -1519) | p_test=0.1: SR 0.466, return  -789.2
+  after 220,000 ep: noiseless greedy success 1 (return    569) | p_test=0.1: SR 0.606, return  -259.1
+  after 230,000 ep: noiseless greedy success 1 (return    550) | p_test=0.1: SR 0.572, return  -328.7
+  after 240,000 ep: noiseless greedy success 1 (return    569) | p_test=0.1: SR 0.598, return  -268.5
+  after 250,000 ep: noiseless greedy success 1 (return    569) | p_test=0.1: SR 0.626, return  -217.7
+  after 260,000 ep: noiseless greedy success 1 (return    569) | p_test=0.1: SR 0.632, return  -206.8
+  after 270,000 ep: noiseless greedy success 1 (return    569) | p_test=0.1: SR 0.590, return  -278.3
+  after 280,000 ep: noiseless greedy success 1 (return    569) | p_test=0.1: SR 0.534, return  -380.0
+  after 290,000 ep: noiseless greedy success 1 (return    569) | p_test=0.1: SR 0.592, return  -277.6
+  after 300,000 ep: noiseless greedy success 0 (return   -679) | p_test=0.1: SR 0.378, return  -716.4
+p_train=0.2 seed=1: training success over last 10k episodes = 0.197
+  after 200,000 ep: noiseless greedy success 0 (return  -1220) | p_test=0.2: SR 0.000, return -1490.8
+  after 210,000 ep: noiseless greedy success 1 (return    549) | p_test=0.2: SR 0.178, return -1116.7
+  after 220,000 ep: noiseless greedy success 1 (return    573) | p_test=0.2: SR 0.222, return -1016.7
+  after 230,000 ep: noiseless greedy success 1 (return    573) | p_test=0.2: SR 0.208, return -1041.6
+  after 240,000 ep: noiseless greedy success 1 (return    573) | p_test=0.2: SR 0.214, return -1030.7
+  after 250,000 ep: noiseless greedy success 0 (return   -615) | p_test=0.2: SR 0.192, return -1079.9
+  after 260,000 ep: noiseless greedy success 1 (return    573) | p_test=0.2: SR 0.224, return -1003.2
+  after 270,000 ep: noiseless greedy success 0 (return  -1362) | p_test=0.2: SR 0.200, return -1129.8
+  after 280,000 ep: noiseless greedy success 0 (return  -1206) | p_test=0.2: SR 0.078, return -1317.6
+  after 290,000 ep: noiseless greedy success 1 (return    573) | p_test=0.2: SR 0.222, return -1020.9
+  after 300,000 ep: noiseless greedy success 0 (return   -840) | p_test=0.2: SR 0.012, return -1404.6
+p_train=0.1 seed=0: training success over last 10k episodes = 0.463
+  after 200,000 ep: noiseless greedy success 1 (return    567) | p_test=0.1: SR 0.580, return  -296.1
+  after 210,000 ep: noiseless greedy success 0 (return  -1200) | p_test=0.1: SR 0.206, return -1111.5
+  after 220,000 ep: noiseless greedy success 1 (return    569) | p_test=0.1: SR 0.598, return  -264.6
+  after 230,000 ep: noiseless greedy success 1 (return    571) | p_test=0.1: SR 0.608, return  -239.9
+  after 240,000 ep: noiseless greedy success 0 (return  -1204) | p_test=0.1: SR 0.212, return -1118.5
+  after 250,000 ep: noiseless greedy success 1 (return    569) | p_test=0.1: SR 0.592, return  -278.0
+  after 260,000 ep: noiseless greedy success 1 (return    569) | p_test=0.1: SR 0.576, return  -322.3
+  after 270,000 ep: noiseless greedy success 1 (return    573) | p_test=0.1: SR 0.620, return  -221.2
+  after 280,000 ep: noiseless greedy success 0 (return  -1800) | p_test=0.1: SR 0.010, return -1716.1
+  after 290,000 ep: noiseless greedy success 1 (return    571) | p_test=0.1: SR 0.584, return  -298.2
+  after 300,000 ep: noiseless greedy success 1 (return    571) | p_test=0.1: SR 0.576, return  -310.7
+p_train=0.2 seed=0: training success over last 10k episodes = 0.162
+  after 200,000 ep: noiseless greedy success 0 (return  -1001) | p_test=0.2: SR 0.014, return -1427.1
+  after 210,000 ep: noiseless greedy success 0 (return  -1712) | p_test=0.2: SR 0.000, return -1531.7
+  after 220,000 ep: noiseless greedy success 0 (return  -1764) | p_test=0.2: SR 0.000, return -1500.1
+  after 230,000 ep: noiseless greedy success 0 (return   -980) | p_test=0.2: SR 0.000, return -1501.9
+  after 240,000 ep: noiseless greedy success 1 (return    573) | p_test=0.2: SR 0.160, return -1144.1
+  after 250,000 ep: noiseless greedy success 1 (return    569) | p_test=0.2: SR 0.182, return -1091.4
+  after 260,000 ep: noiseless greedy success 0 (return  -1750) | p_test=0.2: SR 0.004, return -1597.0
+  after 270,000 ep: noiseless greedy success 1 (return    571) | p_test=0.2: SR 0.210, return -1050.3
+  after 280,000 ep: noiseless greedy success 0 (return  -1058) | p_test=0.2: SR 0.044, return -1359.1
+  after 290,000 ep: noiseless greedy success 1 (return    569) | p_test=0.2: SR 0.226, return -1015.8
+  after 300,000 ep: noiseless greedy success 1 (return    550) | p_test=0.2: SR 0.210, return -1052.8
