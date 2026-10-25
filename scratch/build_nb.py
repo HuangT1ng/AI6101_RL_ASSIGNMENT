@@ -30,6 +30,8 @@ code = lambda s: cells.append(new_code_cell(s.strip('\n')))
 md(r"""
 # AI6101 Reinforcement Learning Assignment — CliffBoxPushing
 
+**Name:** HUANGTING &nbsp;&nbsp; **Matriculation number:** G2605438E
+
 **Algorithm:** tabular **Q-learning** (off-policy TD control) with ε-greedy exploration.
 
 Contents
@@ -71,6 +73,7 @@ NOISE_SEEDS = [0, 1, 2, 3, 4]   # independent training runs per p_train
 EVAL_EPISODES = 1_000           # evaluation episodes per (agent, p_test)
 BONUS_EPISODES = 15_000
 BONUS_SEEDS = [0, 1, 2]
+ABLATION_SEEDS = [0, 1, 2]       # time-out handling ablation (Section 5)
 """)
 
 code(r"""
@@ -141,7 +144,7 @@ Implementation choices (all of them in the agent / training loop, none in the ga
 | Choice | Why |
 |---|---|
 | ε decays linearly from 1.0 to 0.01 over the first half of training | explore broadly early, exploit late. Constant ε = 0.1 is compared in Bonus A |
-| Time-outs are **not** treated as terminal: we bootstrap from $s'$ | time isn't part of the state, so treating the time limit as terminal would teach the agent that ordinary states have value ≈ 0 (*partial-episode bootstrapping*, Pardo et al. 2018) |
+| Time-outs are **not** treated as terminal: we bootstrap from $s'$ | time isn't part of the state, so treating the time limit as terminal would teach the agent that ordinary states have value ≈ 0 (*partial-episode bootstrapping*, Pardo et al. 2018). Ablation in Section 5 |
 | $Q$ initialised to 0 | all non-terminal rewards are negative, so 0 is an *optimistic* initial value that already drives systematic exploration (see Bonus A) |
 | Action noise is applied **after** the agent chooses $a$; the update is made for the **chosen** action $a$ | the noise is part of the environment's dynamics, so $Q(s,a)$ should learn the expected value of *choosing* $a$ under noise, and the agent can then learn noise-aware (safer) behaviour |
 | `sparse_reward=True` replaces the learning signal by $1000\cdot\mathbb{1}[\text{box at goal}]$ | needed for Bonus B. The logged episode return is always the original reward, so results are comparable |
@@ -169,7 +172,7 @@ class RLAgent:
     #   epsilon decays linearly from `epsilon` to `epsilon_min` over the first `decay_ratio` of the episodes;
     #   epsilon == epsilon_min gives a constant epsilon, and epsilon = epsilon_min = 0 a purely greedy agent.
     def __init__(self, env, num_episodes, epsilon=1.0, alpha=0.1, gamma=0.99,
-                 epsilon_min=0.01, decay_ratio=0.5, q_init=0.0):
+                 epsilon_min=0.01, decay_ratio=0.5, q_init=0.0, bootstrap_timeouts=True, snapshot_episodes=()):
         self.action_space = env.action_space
         self.q_table = dict() # Store all Q-values in a dictionary
         # Loop through all possible grid spaces, create sub-dictionary for each
@@ -189,7 +192,10 @@ class RLAgent:
         self.alpha = alpha
         self.gamma = gamma
         self.q_init = q_init
+        self.bootstrap_timeouts = bootstrap_timeouts   # False: treat the 100-step time-out as terminal (ablation only)
         self.successes = []   # per training episode: did the box reach the goal?
+        self.snapshot_episodes = set(snapshot_episodes)   # store a copy of Q before these episodes (stability study)
+        self.snapshots = {}
 
     def epsilon_schedule(self, episode):
         decay_episodes = max(1, int(self.decay_ratio * self.num_episodes))
@@ -215,6 +221,10 @@ class RLAgent:
         target = reward if terminal else reward + self.gamma * max(self.q_table[next_state].values())
         self.q_table[state][action] = q_sa + self.alpha * (target - q_sa)
 
+    def q_array(self):
+        # Compact copy of the Q-table: one row per state (in q_table order), one column per action.
+        return np.array([list(q.values()) for q in self.q_table.values()])
+
     def learn(self, action_noise=0.0, sparse_reward=False):
         # Updates Q-values iteratively. Returns the (original) reward of every training episode.
         rewards = []
@@ -222,6 +232,8 @@ class RLAgent:
 
         for episode in range(self.num_episodes):
             self.epsilon = self.epsilon_schedule(episode)
+            if episode in self.snapshot_episodes:
+                self.snapshots[episode] = self.q_array()
             cumulative_reward = 0 # Initialise values of each game
             state = self.env.reset()
             done = False
@@ -231,7 +243,7 @@ class RLAgent:
                 next_state, reward, done, info = self.env.step(executed_action)
                 reached_goal = all(self.env.box_pos == self.env.goal_pos)
                 learning_reward = (1000 if reached_goal else 0) if sparse_reward else reward
-                terminal = done and is_true_terminal(self.env)            # time-outs are bootstrapped
+                terminal = done and (is_true_terminal(self.env) or not self.bootstrap_timeouts)  # time-outs are bootstrapped
                 self.update(state, action, learning_reward, next_state, terminal)
                 cumulative_reward += reward
                 state = next_state
@@ -239,6 +251,8 @@ class RLAgent:
             rewards.append(cumulative_reward)
             self.successes.append(reached_goal)
 
+        if self.snapshot_episodes:
+            self.snapshots[self.num_episodes] = self.q_array()
         return rewards
 """)
 
@@ -257,14 +271,19 @@ def train_agent(config):
     return agent
 
 
-def train_many(configs):
-    # Train independent agents in parallel (fork-based worker pool), falling back to sequential execution.
+def parallel_map(fn, items):
+    # Apply fn to independent items in parallel (fork-based worker pool), falling back to sequential execution.
     try:
         ctx = mp.get_context('fork')
-        with ctx.Pool(min(len(configs), os.cpu_count() or 1)) as pool:
-            return pool.map(train_agent, configs)
+        with ctx.Pool(min(len(items), os.cpu_count() or 1)) as pool:
+            return pool.map(fn, items)
     except (ValueError, OSError):
-        return [train_agent(c) for c in configs]
+        return [fn(x) for x in items]
+
+
+def train_many(configs):
+    # Train independent agents in parallel.
+    return parallel_map(train_agent, configs)
 """)
 
 md(src(7) + "\n\n(Set `MANUAL_PLAY = True` to play; it is disabled so the notebook can run top-to-bottom.)")
@@ -514,8 +533,9 @@ md(r"""
 **Verification against the exact optimum.** The environment is small and deterministic, so we can enumerate all reachable
 states and solve the 100-step problem exactly by finite-horizon dynamic programming. This is **only used as a reference**
 (never for training). With action noise $p$ the executed action is the chosen one with probability $1-p$ and each other
-action with probability $p/3$, so the same DP also gives the best achievable success probability and expected return under
-noise, which serves as an upper bound for the robustness study.
+action with probability $p/3$, so the same DP also gives the best achievable expected return under noise (an upper bound
+for the robustness study) and the success probability of that return-maximising policy (a reference value: a policy that
+only maximised the success probability could do slightly better).
 """)
 code(r"""
 def build_model():
@@ -565,6 +585,30 @@ print(f"Learned greedy policy (p = 0): return {total}")
 md(src(17))
 code(src(18))
 
+md(r"""
+**Ablation: time-outs as truncation vs. terminal.** The main agent bootstraps from $s'$ when an episode is cut off after
+100 steps (`bootstrap_timeouts=True`). Here the same agent is trained with the time-out treated as a terminal state instead
+(target $= r$), 3 seeds each, 15,000 episodes, no action noise.
+""")
+code(r"""
+configs = [dict(num_episodes=MAIN_EPISODES, seed=s, bootstrap_timeouts=b) for b in [True, False] for s in ABLATION_SEEDS]
+agents = train_many(configs)
+print(f"{'time-out handling':22s} {'first success per seed':>24s} {'last-1k train SR':>16s} {'greedy return':>14s}")
+for k, name in enumerate(['bootstrap (main agent)', 'terminal']):
+    runs = agents[k * len(ABLATION_SEEDS):(k + 1) * len(ABLATION_SEEDS)]
+    firsts = [int(np.argmax(a.successes)) if any(a.successes) else None for a in runs]
+    last_sr = np.mean([np.mean(a.successes[-1000:]) for a in runs])
+    greedy = [int(greedy_rollout(a)[2]) for a in runs]
+    print(f"{name:22s} {str(firsts):>24s} {last_sr:>16.3f} {str(greedy):>14s}")
+""")
+md(r"""
+Treating the time-out as terminal makes **no measurable difference** here: both variants first reach the goal after ≈9k–11k
+episodes, succeed in ≈95% of the last 1,000 training episodes and end with the optimal greedy policy (return 577). Once the
+goal has been found, the greedy route takes 39 steps and never reaches the time limit, so the biased targets only affect
+states visited at step 100 of failed episodes. We keep the bootstrapped target because it is the correct one for a
+time-limited task, not because it improves the results.
+""")
+
 # ---------------------------------------------------------------- robustness
 md(r"""
 ## 6. Action-noise robustness study
@@ -583,9 +627,13 @@ md(src(19))
 code(r"""
 noise_levels = [0.0, 0.1, 0.2]
 noise_runs = {}  # (budget, p_train) -> list of agents (one per seed)
+# Long runs also store a Q-table snapshot every 1/30 of the budget during the last third (used for the stability study).
+SNAPSHOT_EPISODES = tuple(range(2 * NOISE_LONG_EPISODES // 3, NOISE_LONG_EPISODES, NOISE_LONG_EPISODES // 30))
 
 for budget in [NOISE_SHORT_EPISODES, NOISE_LONG_EPISODES]:
-    configs = [dict(num_episodes=budget, action_noise=p, seed=s) for p in noise_levels for s in NOISE_SEEDS]
+    snapshots = SNAPSHOT_EPISODES if budget == NOISE_LONG_EPISODES else ()
+    configs = [dict(num_episodes=budget, action_noise=p, seed=s, snapshot_episodes=snapshots)
+               for p in noise_levels for s in NOISE_SEEDS]
     start_time = time.time()
     agents = train_many(configs)
     print(f"budget {budget}: trained {len(agents)} agents in {time.time() - start_time:.0f}s")
@@ -676,7 +724,7 @@ for budget, (sr, ret) in results.items():
     print(ret.mean(0).round(1))
     print("Per-seed success rate at p_test = p_train:",
           {p: sr[:, i, i].round(2).tolist() for i, p in enumerate(noise_levels)})
-print("\nDP optimum (upper bound) for p_test = 0 / 0.1 / 0.2: success",
+print("\nDP return-maximising policy for p_test = 0 / 0.1 / 0.2: success",
       ' / '.join(f'{OPTIMAL[p][1]:.3f}' for p in noise_levels), "; return", ' / '.join(f'{OPTIMAL[p][0]:.1f}' for p in noise_levels))
 
 print("\nPer-seed results, long budget (success rate at p_test = 0 / 0.1 / 0.2 | return at p_test = 0.1):")
@@ -717,7 +765,7 @@ plt.show()
 """)
 
 code(r"""
-# Greedy noiseless path of each long-budget agent (seed 0) that solves the noiseless task: does noise make it more careful?
+# Greedy noiseless path of every long-budget agent: does training with noise change the route?
 for p in noise_levels:
     for k, a in enumerate(noise_runs[(NOISE_LONG_EPISODES, p)]):
         st, ac, tot, ok = greedy_rollout(a)
@@ -725,15 +773,114 @@ for p in noise_levels:
 """)
 
 md(r"""
-**Discussion — see the report for the full analysis.** Main observations:
-* **Action noise makes learning far harder.** With 15k episodes the noise-free agents converge, but the noisy agents
-  never reach the goal even once during training. Slips near the narrow box corridors keep sending the box (or the agent)
-  over the cliff, so the optimism-driven exploration never pushes the box far enough to find the +1000.
-* **With a longer budget, moderate noise ($p_{train}=0.1$) converges reliably and yields the most robust policy.** It beats the
-  noise-free policy at $p_{test} = 0.1$ and $0.2$, close to the DP optimum, and still solves the noiseless task, using a slightly
-  longer and safer route (return a little below 577).
-* **Heavy noise ($p_{train}=0.2$) is unreliable**: within the same budget only some seeds discover and keep the goal-reaching
-  behaviour, and the others converge to "avoid the cliff and wait for the time-out".
+**Stability of the greedy policy.** Two long-budget noisy runs (seed 1 for $p_{train}=0.1$ and $0.2$) fail the noise-free task
+in the final evaluation even though they learned (see the training curves). To check whether this is a persistent failure, the long
+runs store a copy of the Q-table every 10,000 episodes during the last third of training, and every snapshot is evaluated greedily
+(ε = 0) under each $p_{test}$.
+""")
+code(r"""
+SNAPSHOT_EVAL_EPISODES = 200
+long_agents = [(p, k, a) for p in noise_levels for k, a in enumerate(noise_runs[(NOISE_LONG_EPISODES, p)])]
+snap_x = sorted(long_agents[0][2].snapshots)
+
+
+def snapshot_agent(agent, q_array):
+    # A copy of `agent` that acts with a stored Q-table snapshot.
+    snap = copy.copy(agent)
+    snap.q_table = {s: dict(zip(agent.action_space, row)) for s, row in zip(agent.q_table, q_array.tolist())}
+    return snap
+
+
+def evaluate_snapshots(i):
+    # Greedy success rate of every snapshot of long_agents[i] under each p_test: array [snapshot, p_test].
+    agent = long_agents[i][2]
+    np.random.seed(SEED + i)
+    return np.array([[evaluate(snapshot_agent(agent, agent.snapshots[x]), p, total_run=SNAPSHOT_EVAL_EPISODES)[0]
+                      for p in noise_levels] for x in snap_x])
+
+
+start_time = time.time()
+snapshot_sr = parallel_map(evaluate_snapshots, list(range(len(long_agents))))
+SNAP = {p: np.array([sr for (q, _, _), sr in zip(long_agents, snapshot_sr) if q == p]) for p in noise_levels}  # [seed, snapshot, p_test]
+print(f"Evaluated {len(snap_x)} snapshots x {len(long_agents)} runs in {time.time() - start_time:.0f}s "
+      f"(episodes {snap_x[0]:,} ... {snap_x[-1]:,}, {SNAPSHOT_EVAL_EPISODES} evaluation episodes per p_test)")
+for i, p in enumerate(noise_levels):
+    S = SNAP[p]
+    print(f"\np_train={p}: {np.mean(S[:, :, 0] == 1):.0%} of the snapshots solve the noise-free task; "
+          f"mean success over all snapshots at p_test = 0 / 0.1 / 0.2: " + ' / '.join(f'{v:.3f}' for v in S.mean((0, 1))))
+    print(f"  training success over the last third, per seed: {[round(float(np.mean(a.successes[snap_x[0]:])), 3) for q, _, a in long_agents if q == p]}")
+    print(f"  success at p_test = {p} per seed (rows) and snapshot (columns):")
+    print(S[:, :, i].round(2))
+""")
+code(r"""
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.4), sharey=True, constrained_layout=True)
+for i, p in enumerate(noise_levels):
+    ax = axes[i]
+    for k in range(len(NOISE_SEEDS)):
+        ax.plot(snap_x, SNAP[p][k, :, i], color=SERIES[i], alpha=0.8, linewidth=1.2, marker='o', markersize=3,
+                label='one line per seed' if k == 0 else None)
+    ax.axhline(OPTIMAL[p][1], color=INK_2, linewidth=1, linestyle='--', label='DP optimum')
+    ax.set_title(f'p_train = p_test = {p}')
+    ax.set_xlabel('Training episode of the snapshot')
+    ax.legend(loc='lower left', fontsize=8)
+axes[0].set_ylabel('Greedy success rate')
+axes[0].set_ylim(-0.03, 1.05)
+fig.suptitle(f'Greedy success rate of the Q-table snapshots taken during the last third of the {NOISE_LONG_EPISODES:,}-episode runs '
+             f'({SNAPSHOT_EVAL_EPISODES} episodes per point)', fontsize=10)
+save(fig, 'noise_snapshots.png')
+plt.show()
+""")
+
+md(r"""
+### Discussion: how action noise affects learning, and whether noisy training improves robustness
+
+**Effect on learning.** With the template's 15,000 episodes, all five noise-free agents converge (first success after
+10.7k–11.1k episodes), but **none of the ten noisy agents reaches the goal even once during training**. Their greedy policies
+therefore have a success rate of 0 under every $p_{test}$. Noise breaks the optimism-driven exploration that solves the
+noise-free task. The first success requires pushing the box ≈15 cells along a cliff-lined corridor. Slips near the corridor
+often send the agent or the box into a cliff, and the −1000 is credited to the action that was *chosen*. Corridor states
+therefore start to look worse than the safe start region before the +1000 has ever been found. With 300,000 episodes all
+settings learn, but noise delays the first success from 110.8k–113.5k episodes ($p=0$) to 140.9k–161.0k ($p=0.1$) and
+160.0k–219.1k ($p=0.2$). Even the optimal policy fails 41% ($p=0.1$) or 75% ($p=0.2$) of the time, because 39 consecutive
+moves next to cliffs have to survive the random slips. Low success rates under noise are therefore mostly a property of the
+task, not of the learner.
+
+**Cross-noise generalisation (final policies, 1,000 episodes per cell).**
+* $p_{train}=0$ is perfect at $p_{test}=0$ but reaches only 0.494 / 0.168 success at $p_{test}$ = 0.1 / 0.2. That is 84% / 67%
+  of the DP policy's 0.587 / 0.252. It only knows the shortest route, which hugs the cliffs, and it rarely visited the
+  off-path states that a slip leads to.
+* $p_{train}=0.1$ gives the most robust policies. Four of the five seeds reach 0.575–0.586 success at $p_{test}=0.1$ and
+  0.246–0.257 at $p_{test}=0.2$ (≈98–102% of the DP values, within the ±0.016 standard error), with returns of −307 to −283
+  at $p_{test}=0.1$ (DP: −279). They still solve the noise-free task (return 571–573). The learning target includes the
+  consequences of slips, so actions whose slips lead into a cliff are valued lower. The slips also make the agent visit, and
+  learn to recover from, off-path states.
+* $p_{train}=0.2$ brings no further benefit. Its median seed is worse than $p_{train}=0.1$ even when tested at $p=0.2$ (0.23 vs
+  0.25), because it finds the goal later (on average at episode 184k vs 151k) and its value estimates are noisier.
+
+**Why one seed per noisy setting fails (snapshot study above).** Seed 1 fails the noise-free task at the end of training for
+both $p_{train}=0.1$ and $0.2$, but this is not a failure to learn:
+1. Its training success over the last third (0.496 at $p=0.1$, 0.162 at $p=0.2$) is the same as that of the other seeds
+   (0.485–0.503 and 0.091–0.156).
+2. Most of its earlier snapshots are good: 8 of its 11 snapshots reach ≈0.50–0.62 success at $p_{test}=0.1$.
+3. The seeds that look good at the end have bad snapshots too. With $p_{train}=0.1$, 18% of all 55 snapshots fail the
+   noise-free task, and every seed has at least one snapshot with ≤ 0.40 success at $p_{test}=0.1$ (seed 0 drops to 0.00 at
+   280k episodes). With $p_{train}=0.2$, only 56% of the snapshots solve the noise-free task. Without noise, 100% do.
+
+The cause is the **constant step size** $\alpha=0.1$. Under noise, the TD target of the same $(s,a)$ is random: a slip into a
+cliff gives a target near −1000, far below the target after a normal step, so a single update moves $Q(s,a)$ by
+$\alpha\cdot 1000 \approx 100$ or more. This can exceed the gap between the best and the second-best action at a critical state. The greedy action at a
+critical state therefore keeps flipping, and when it flips to a bad action, the deterministic noise-free rollout gets stuck
+until the 100-step time-out (return −679 / −840 instead of ≈570). Noise-free targets are deterministic, so those Q-values
+converge and every snapshot behaves identically. Two standard remedies, not applied here so that all $p_{train}$ settings
+use the main agent's exact configuration, are a decaying step size (e.g. $\alpha \propto 1/N(s,a)$, which satisfies the
+Robbins–Monro conditions) and choosing the final policy by evaluating checkpoints on separate validation episodes.
+
+**Answer.** Action noise makes learning much harder. It needs about 20× the template's budget, the goal is found later, and
+the final greedy policy is unstable from one checkpoint to the next. Training with **moderate noise ($p_{train}=0.1$) does
+improve robustness**. A converged policy closes almost the whole gap to the optimal noisy policy and loses almost nothing on
+the noise-free task. Averaged over *all* 55 snapshots, including the bad ones, it still beats $p_{train}=0$ at $p_{test}=0.1$
+(0.512 vs 0.495) and $p_{test}=0.2$ (0.209 vs 0.173), at the price of 18% of snapshots failing the noise-free task. Heavier
+noise ($p_{train}=0.2$) brings no additional benefit within the budget (0.564 / 0.322 / 0.124 averaged over its snapshots).
 """)
 
 # ---------------------------------------------------------------- bonus A
@@ -841,7 +988,7 @@ plot_runs(exploration_runs, 'training_rewards', 'Episode reward (moving average,
 md(r"""
 **Analysis** (numbers from the table above; 3 seeds each).
 * **The two optimism-driven strategies are clearly best.** UCB1 and "no exploration" with $Q_0=0$ both find the goal after
-  ≈4.5k episodes and reach a 100% training success rate. They also have by far the highest mean training reward (≈ −300 vs. ≈ −1100 to −1200 for ε-greedy).
+  ≈4.5k–4.7k episodes and reach a 100% training success rate. They also have by far the highest mean training reward (≈ −300 vs. ≈ −1100 to −1200 for ε-greedy).
 * **"No exploration" with $Q_0 = 0$ is not actually exploration-free.** Every real reward is negative, so 0 is an *optimistic* estimate.
   Each time a state-action is tried its value drops below the untried ones, so the greedy agent systematically sweeps through the
   state space (optimism in the face of uncertainty).
